@@ -45,12 +45,12 @@ async function withRelations(rows: DealRow[], context: Awaited<ReturnType<typeof
       for (const row of result.data || []) companyNames.set(row.id, row.name)
     }
   }
-  return rows.map(({ pipeline_id, stage_id, contact_id, company_id, ...row }) => ({
+  return rows.map((row) => ({
     ...row,
-    pipeline_name: pipelineNames.get(pipeline_id) || null,
-    stage_name: stageNames.get(stage_id) || null,
-    contact_name: contact_id ? contactNames.get(contact_id) || null : null,
-    company_name: company_id ? companyNames.get(company_id) || null : null,
+    pipeline_name: pipelineNames.get(row.pipeline_id) || null,
+    stage_name: stageNames.get(row.stage_id) || null,
+    contact_name: row.contact_id ? contactNames.get(row.contact_id) || null : null,
+    company_name: row.company_id ? companyNames.get(row.company_id) || null : null,
   }))
 }
 
@@ -194,3 +194,68 @@ async function saveDeal(form: FormData, id?: string): Promise<DealFormState & { 
 
 export const createDeal = (form: FormData) => saveDeal(form)
 export const updateDeal = (id: string, form: FormData) => saveDeal(form, id)
+
+export async function getDealsKanban(pipelineId?: string, search = '') {
+  const context = await dealsContext()
+  if (search.length > 200) throw new Error('Invalid search.')
+  const canViewPipelines = context.permissions.has('PIPELINES_VIEW')
+  let pipelines: PipelineOption[] = []
+  if (canViewPipelines) {
+    const pResult = await context.supabase.from('pipelines').select('id, name, is_default').eq('workspace_id', context.workspaceId).order('is_default', { ascending: false }).order('name').order('id')
+    if (pResult.error) throw new Error('Unable to load pipelines. Please try again.')
+    pipelines = (pResult.data || []) as PipelineOption[]
+  }
+  const activePipeline = pipelines.find(p => p.id === pipelineId) || pipelines.find(p => p.is_default) || pipelines[0] || null
+  let stages: StageOption[] = []
+  if (canViewPipelines && activePipeline) {
+    const sResult = await context.supabase.from('stages').select('id, pipeline_id, name, position, type').eq('workspace_id', context.workspaceId).eq('pipeline_id', activePipeline.id).order('position').order('id')
+    if (sResult.error) throw new Error('Unable to load stages. Please try again.')
+    stages = (sResult.data || []) as StageOption[]
+  }
+
+  let deals: Deal[] = []
+  if (activePipeline || !canViewPipelines) {
+    let query = context.supabase.from('deals').select(columns).eq('workspace_id', context.workspaceId)
+    if (activePipeline) {
+      query = query.eq('pipeline_id', activePipeline.id)
+    }
+    if (search.trim()) {
+      query = query.or(dealSearchFilter(search.trim()))
+    }
+    const { data, error } = await query.order('created_at', { ascending: false }).order('id').limit(500)
+    if (error) throw new Error('Unable to load deals for Kanban. Please try again.')
+    deals = await withRelations((data || []) as DealRow[], context)
+  }
+
+  return {
+    deals,
+    pipelines,
+    activePipeline,
+    stages,
+    canManage: context.permissions.has('DEALS_MANAGE'),
+    canViewPipelines,
+    canViewContacts: context.permissions.has('CONTACTS_VIEW'),
+    canViewCompanies: context.permissions.has('COMPANIES_VIEW'),
+  }
+}
+
+export async function updateDealStage(dealId: string, stageId: string): Promise<{ success?: boolean; error?: string }> {
+  const context = await dealsContext('edit')
+  if (!isDealId(dealId) || !isDealId(stageId)) return { error: 'Invalid deal or stage ID.' }
+
+  const targetDeal = await context.supabase.from('deals').select('id, pipeline_id, stage_id').eq('workspace_id', context.workspaceId).eq('id', dealId).maybeSingle()
+  if (targetDeal.error || !targetDeal.data) return { error: 'Deal not found or unavailable.' }
+
+  if (targetDeal.data.stage_id === stageId) return { success: true }
+
+  if (context.permissions.has('PIPELINES_VIEW')) {
+    const stageCheck = await context.supabase.from('stages').select('id').eq('workspace_id', context.workspaceId).eq('pipeline_id', targetDeal.data.pipeline_id).eq('id', stageId).maybeSingle()
+    if (stageCheck.error || !stageCheck.data) return { error: 'Destination stage is invalid or does not belong to the active pipeline.' }
+  }
+
+  const updateResult = await context.supabase.from('deals').update({ stage_id: stageId }).eq('workspace_id', context.workspaceId).eq('id', dealId)
+  if (updateResult.error) return { error: 'Unable to update deal stage. Please try again.' }
+
+  return { success: true }
+}
+

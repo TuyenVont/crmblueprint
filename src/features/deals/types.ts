@@ -15,7 +15,7 @@ export interface DealRow extends DealInput {
   updated_at: string
 }
 
-export interface Deal extends Omit<DealRow, 'pipeline_id' | 'stage_id' | 'contact_id' | 'company_id'> {
+export interface Deal extends DealRow {
   pipeline_name: string | null
   stage_name: string | null
   contact_name: string | null
