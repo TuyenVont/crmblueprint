@@ -23,7 +23,7 @@ export async function updateDealItemAction(
   _previous: DealItemFormState,
   form: FormData
 ): Promise<DealItemFormState> {
-  const result = await updateDealItem(dealItemId, form)
+  const result = await updateDealItem(dealId, dealItemId, form)
   if (result.success || result.id) {
     revalidatePath(`/app/deals/${dealId}`)
     return { success: true }
@@ -35,7 +35,7 @@ export async function deleteDealItemAction(
   dealItemId: string,
   dealId: string
 ): Promise<{ success?: boolean; error?: string }> {
-  const result = await deleteDealItem(dealItemId)
+  const result = await deleteDealItem(dealId, dealItemId)
   if (result.success) {
     revalidatePath(`/app/deals/${dealId}`)
   }

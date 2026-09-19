@@ -125,12 +125,13 @@ export async function getDashboardData(): Promise<DashboardData> {
 
     const allDeals = dealsRes.data || []
 
-    const openDealsList = canViewPipelines
-      ? allDeals.filter((d) => openStageIds.has(d.stage_id))
-      : allDeals
-
-    openDeals = openDealsList.length
-    openPipelineValue = openDealsList.reduce((sum, d) => sum + (parseFloat(d.amount) || 0), 0)
+    // Stage type is protected by PIPELINES_VIEW. Without it, reporting every
+    // Deal as open would include WON/LOST rows and produce incorrect metrics.
+    if (canViewPipelines) {
+      const openDealsList = allDeals.filter((d) => openStageIds.has(d.stage_id))
+      openDeals = openDealsList.length
+      openPipelineValue = openDealsList.reduce((sum, d) => sum + (parseFloat(d.amount) || 0), 0)
+    }
 
     if (canViewPipelines && stagesMap.size > 0) {
       const breakdownMap = new Map<string, StageBreakdownItem>()

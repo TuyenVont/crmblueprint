@@ -25,7 +25,9 @@ export function validateDealItemInput(
   const productId = typeof productIdRaw === 'string' ? productIdRaw.trim() || null : null
 
   const quantityStr = readStr('quantity', 20, isCreate ? '1' : '')
-  const priceStr = readStr('price', 20, '0')
+  // Creation snapshots the selected Product price after the Product is loaded
+  // server-side. A submitted price only applies to edits of an existing item.
+  const priceStr = isCreate ? '' : readStr('price', 20, '0')
   const discountStr = readStr('discount', 20, '0')
   const taxStr = readStr('tax', 20, '0')
 
@@ -37,7 +39,7 @@ export function validateDealItemInput(
     tax: taxStr,
   }
 
-  if (isCreate && !productId) {
+  if (isCreate && (!productId || !isDealItemId(productId))) {
     fields.product_id = 'Select an available product.'
   }
 
@@ -52,12 +54,14 @@ export function validateDealItemInput(
     }
   }
 
-  if (!priceStr || !numRegex.test(priceStr)) {
-    fields.price = 'Enter a non-negative decimal value.'
-  } else {
-    const p = parseFloat(priceStr)
-    if (isNaN(p) || p < 0) {
-      fields.price = 'Price must be non-negative.'
+  if (!isCreate) {
+    if (!priceStr || !numRegex.test(priceStr)) {
+      fields.price = 'Enter a non-negative decimal value.'
+    } else {
+      const p = parseFloat(priceStr)
+      if (isNaN(p) || p < 0) {
+        fields.price = 'Price must be non-negative.'
+      }
     }
   }
 
@@ -79,7 +83,7 @@ export function validateDealItemInput(
     }
   }
 
-  if (!fields.quantity && !fields.price && !fields.discount) {
+  if (!isCreate && !fields.quantity && !fields.price && !fields.discount) {
     const q = parseFloat(quantityStr)
     const p = parseFloat(priceStr)
     const d = parseFloat(discountStr)

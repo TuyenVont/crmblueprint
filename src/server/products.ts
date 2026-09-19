@@ -66,6 +66,38 @@ async function saveProduct(form: FormData, id?: string): Promise<ProductFormStat
     return { fields: { ...fields, image_url: imageValidation.error }, values: input, error: 'Please correct the highlighted fields.' }
   }
 
+  if (Object.keys(fields || {}).length) return { fields, values: input, error: 'Please correct the highlighted fields.' }
+
+  let uploadedFilePath: string | null = null
+  let uploadedPublicUrl: string | null = null
+
+  const cleanupUploadedImage = async () => {
+    if (!uploadedFilePath) return
+    const { error } = await supabase.storage.from('product-images').remove([uploadedFilePath])
+    if (error) {
+      console.error('PRODUCT IMAGE CLEANUP ERROR:', { message: error.message, name: error.name })
+    }
+  }
+
+  const cleanupReplacedImage = async () => {
+    if (!uploadedFilePath || !uploadedPublicUrl || !currentImageUrl) return
+    try {
+      const newUrl = new URL(uploadedPublicUrl)
+      const oldUrl = new URL(currentImageUrl)
+      const pathPrefix = newUrl.pathname.slice(0, -uploadedFilePath.length)
+      if (oldUrl.origin !== newUrl.origin || !oldUrl.pathname.startsWith(pathPrefix)) return
+      const oldPath = decodeURIComponent(oldUrl.pathname.slice(pathPrefix.length))
+      const ownedPath = new RegExp(`^${workspaceId}/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\\.(?:jpeg|png|webp)$`, 'i')
+      if (!ownedPath.test(oldPath)) return
+      const { error } = await supabase.storage.from('product-images').remove([oldPath])
+      if (error) {
+        console.error('PRODUCT IMAGE REPLACEMENT CLEANUP ERROR:', { message: error.message, name: error.name })
+      }
+    } catch {
+      // External or malformed image URLs are never deletion targets.
+    }
+  }
+
   if (imageFile && imageFile.size > 0) {
     const ext = imageFile.type.split('/')[1] || 'png'
     const filePath = `${workspaceId}/${crypto.randomUUID()}.${ext}`
@@ -87,8 +119,11 @@ async function saveProduct(form: FormData, id?: string): Promise<ProductFormStat
         }
       }
 
+      uploadedFilePath = filePath
+
       const { data: publicUrlData } = supabase.storage.from('product-images').getPublicUrl(filePath)
       if (publicUrlData?.publicUrl) {
+        uploadedPublicUrl = publicUrlData.publicUrl
         input.image_url = publicUrlData.publicUrl
       }
     }
@@ -97,8 +132,6 @@ async function saveProduct(form: FormData, id?: string): Promise<ProductFormStat
     input.image_url = currentImageUrl
   }
 
-  if (Object.keys(fields || {}).length) return { fields, values: input, error: 'Please correct the highlighted fields.' }
-
   const query = id === undefined
     ? supabase.from('products').insert({ ...input, workspace_id: workspaceId })
     : supabase.from('products').update(input).eq('workspace_id', workspaceId).eq('id', id)
@@ -106,6 +139,7 @@ async function saveProduct(form: FormData, id?: string): Promise<ProductFormStat
   if (id === undefined && !permissions.has('PRODUCTS_VIEW')) {
     const { error } = await query
     if (error) {
+      await cleanupUploadedImage()
       if (error.code === '23505' || error.message?.toLowerCase().includes('sku') || error.message?.toLowerCase().includes('unique')) {
         return { fields: { sku: 'A product with this SKU already exists.' }, values: input, error: 'Please correct the highlighted fields.' }
       }
@@ -116,15 +150,19 @@ async function saveProduct(form: FormData, id?: string): Promise<ProductFormStat
 
   const { data, error } = await query.select('id').maybeSingle()
   if (error) {
+    await cleanupUploadedImage()
     if (error.code === '23505' || error.message?.toLowerCase().includes('sku') || error.message?.toLowerCase().includes('unique')) {
       return { fields: { sku: 'A product with this SKU already exists.' }, values: input, error: 'Please correct the highlighted fields.' }
     }
     return { values: input, error: 'Unable to save product. Please try again.' }
   }
-  if (!data) return { values: input, error: 'Product not found or unavailable.' }
+  if (!data) {
+    await cleanupUploadedImage()
+    return { values: input, error: 'Product not found or unavailable.' }
+  }
+  await cleanupReplacedImage()
   return { id: data.id }
 }
 
 export const createProduct = (form: FormData) => saveProduct(form)
 export const updateProduct = (id: string, form: FormData) => saveProduct(form, id)
-

@@ -143,6 +143,15 @@ test('open Deals and open Pipeline Value exclude terminal WON/LOST stages', asyn
   assert.equal(lostStage.totalValue, 3000000)
 })
 
+test('open metrics remain unavailable when stage types are not viewable', async () => {
+  const s = service(['DEALS_VIEW'])
+  const data = await s.getDashboardData()
+  assert.equal(data.kpis.openDeals, null)
+  assert.equal(data.kpis.openPipelineValue, null)
+  assert.ok(s.calls.some((c) => c[0] === 'from' && c[1] === 'deals'))
+  assert.ok(!s.calls.some((c) => c[0] === 'from' && c[1] === 'stages'))
+})
+
 test('queries are strictly scoped to current workspace', async () => {
   const s = service()
   await s.getDashboardData()

@@ -135,7 +135,19 @@ export async function createDealItem(
   }
 
   const product = productCheck.data
-  const finalPrice = form.has('price') && form.get('price') !== '' ? input.price : product.price
+
+  // The initial item price is a catalog snapshot. Browser-provided pricing is
+  // accepted only when editing an existing item, never when creating one.
+  const finalPrice = product.price
+
+  const subtotal = Number(finalPrice) * Number(input.quantity)
+  if (Number(input.discount) > subtotal) {
+    return {
+      fields: { discount: 'Discount cannot exceed the item subtotal.' },
+      values: { ...input, price: finalPrice },
+      error: 'Please correct the highlighted fields.',
+    }
+  }
 
   const payload = {
     workspace_id: context.workspaceId,
@@ -161,16 +173,18 @@ export async function createDealItem(
 }
 
 export async function updateDealItem(
+  dealId: string,
   dealItemId: string,
   form: FormData
 ): Promise<DealItemFormState & { id?: string }> {
   const context = await dealItemsContext('manage')
-  if (!isDealItemId(dealItemId)) return { error: 'Deal item not found or unavailable.' }
+  if (!isDealId(dealId) || !isDealItemId(dealItemId)) return { error: 'Deal item not found or unavailable.' }
 
   const currentItem = await context.supabase
     .from('deal_items')
     .select('id, deal_id, name_snapshot')
     .eq('workspace_id', context.workspaceId)
+    .eq('deal_id', dealId)
     .eq('id', dealItemId)
     .maybeSingle()
 
@@ -194,6 +208,7 @@ export async function updateDealItem(
     .from('deal_items')
     .update(payload)
     .eq('workspace_id', context.workspaceId)
+    .eq('deal_id', dealId)
     .eq('id', dealItemId)
     .select('id')
     .maybeSingle()
@@ -208,14 +223,15 @@ export async function updateDealItem(
   return { success: true, id: data.id }
 }
 
-export async function deleteDealItem(dealItemId: string): Promise<{ success?: boolean; error?: string }> {
+export async function deleteDealItem(dealId: string, dealItemId: string): Promise<{ success?: boolean; error?: string }> {
   const context = await dealItemsContext('manage')
-  if (!isDealItemId(dealItemId)) return { error: 'Deal item not found or unavailable.' }
+  if (!isDealId(dealId) || !isDealItemId(dealItemId)) return { error: 'Deal item not found or unavailable.' }
 
   const currentItem = await context.supabase
     .from('deal_items')
     .select('id')
     .eq('workspace_id', context.workspaceId)
+    .eq('deal_id', dealId)
     .eq('id', dealItemId)
     .maybeSingle()
 
@@ -227,6 +243,7 @@ export async function deleteDealItem(dealItemId: string): Promise<{ success?: bo
     .from('deal_items')
     .delete()
     .eq('workspace_id', context.workspaceId)
+    .eq('deal_id', dealId)
     .eq('id', dealItemId)
 
   if (error) {

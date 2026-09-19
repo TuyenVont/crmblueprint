@@ -50,6 +50,10 @@ function service(permissions = ['PRODUCTS_VIEW'], results = [{ data: sampleProdu
             calls.push(['storage.getPublicUrl', bucket, path])
             return { data: { publicUrl: `https://example.com/storage/${path}` } }
           },
+          remove: async (paths) => {
+            calls.push(['storage.remove', bucket, paths])
+            return { data: paths, error: null }
+          },
         }),
       },
       from: (table) => {
@@ -175,4 +179,39 @@ test('product image file validation rejects invalid MIME types and large files',
   assert.equal(validation.validateProductImage(badMime).valid, false)
   assert.equal(validation.validateProductImage(badSize).valid, false)
   assert.equal(validation.validateProductImage(goodFile).valid, true)
+})
+
+test('image upload uses a server workspace path and cleans only that path when save fails', async () => {
+  const form = productForm()
+  form.set('workspace_id', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')
+  form.set('image_file', new Blob(['image'], { type: 'image/png' }), 'client-name.png')
+  const duplicateError = { data: null, error: { code: '23505', message: 'duplicate sku' } }
+  const s = service(['PRODUCTS_VIEW', 'PRODUCTS_MANAGE'], [duplicateError])
+
+  await s.createProduct(form)
+
+  const upload = s.calls.find((c) => c[0] === 'storage.upload')
+  assert.equal(upload[1], 'product-images')
+  assert.match(upload[2], new RegExp(`^${workspace}/[0-9a-f-]{36}\\.png$`, 'i'))
+  assert.deepEqual(upload[3], { contentType: 'image/png', upsert: false })
+
+  const cleanup = s.calls.find((c) => c[0] === 'storage.remove')
+  assert.deepEqual(cleanup, ['storage.remove', 'product-images', [upload[2]]])
+})
+
+test('image replacement never deletes an external URL', async () => {
+  const form = productForm()
+  form.set('image_file', new Blob(['image'], { type: 'image/webp' }), 'replacement.webp')
+  const s = service(
+    ['PRODUCTS_VIEW', 'PRODUCTS_MANAGE'],
+    [
+      { data: { id: productId, image_url: 'https://external.example/catalog/image.webp' }, error: null },
+      { data: { id: productId }, error: null },
+    ]
+  )
+
+  const result = await s.updateProduct(productId, form)
+
+  assert.deepEqual(result, { id: productId })
+  assert.ok(!s.calls.some((c) => c[0] === 'storage.remove'))
 })

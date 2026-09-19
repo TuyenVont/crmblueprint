@@ -138,9 +138,9 @@ export function DealItemsSection({
                 name="price"
                 type="text"
                 required
+                readOnly
                 value={selectedPrice}
-                onChange={(e) => setSelectedPrice(e.target.value)}
-                className="mt-1 block w-full rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm"
+                className="mt-1 block w-full rounded-md border border-gray-300 bg-gray-100 px-2.5 py-1.5 text-sm text-gray-700"
               />
               {addState.fields?.price && <p className="text-xs text-red-700">{addState.fields.price}</p>}
             </div>
